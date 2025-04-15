@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Graph (D3)</title>
+    <script src="https://cdn.tailwindcss.com"></script> <!-- Added for potential future use, though sample uses inline -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script> <!-- Re-added PapaParse for CSV loading -->
+    <style>
+        /* Basic styles */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            background-color: #f3f4f6; /* Tailwind gray-100 */
+        }
+        /* SVG container styles */
+        #graph-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        svg {
+            width: 95%;
+            height: 95%;
+            border: 1px solid #e5e7eb; /* Tailwind gray-200 */
+            border-radius: 0.5rem; /* Tailwind rounded-lg */
+            background-color: #ffffff; /* White background */
+            cursor: grab; /* Grab cursor */
+        }
+        svg:active {
+            cursor: grabbing; /* Grabbing cursor */
+        }
+        /* Link styles */
+        .link {
+            stroke: #9ca3af; /* Tailwind gray-400 */
+            stroke-opacity: 0.6;
+        }
+        /* Node styles */
+        .node {
+            cursor: pointer; /* Pointer cursor */
+            transition: transform 0.1s ease-in-out; /* Hover effect */
+        }
+        .node:hover {
+            transform: scale(1.1); /* Scale up on hover */
+        }
+        /* Node label styles */
+        .node-label {
+            font-size: 10px;
+            fill: #1f2937; /* Tailwind gray-800 */
+            pointer-events: none; /* Text doesn't block mouse events */
+            text-anchor: middle; /* Center text */
+            dominant-baseline: central; /* Vertically center */
+        }
+        /* Node colors by level */
+        .node-level-0 { fill: #ef4444; } /* Tailwind red-500 */
+        .node-level-1 { fill: #3b82f6; } /* Tailwind blue-500 */
+        .node-level-2 { fill: #10b981; } /* Tailwind emerald-500 */
+        .node-level-3 { fill: #f97316; } /* Tailwind orange-500 */
+        .node-level-4 { fill: #8b5cf6; } /* Tailwind violet-500 */
+        /* Add more levels if needed */
+        .node-level-default { fill: #6b7280; } /* Tailwind gray-500 */
+
+
+        /* Title styles */
+        .title {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.5rem; /* Tailwind text-2xl */
+            font-weight: 600; /* Tailwind font-semibold */
+            color: #1f2937; /* Tailwind gray-800 */
+            z-index: 10; /* Ensure it's above the SVG */
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="title">Knowledge Graph Visualization</div>
+    <div id="graph-container">
+        <svg id="knowledge-graph"></svg>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const csvFilePath = 'knowledge_tree.csv';
+            const svg = d3.select("#knowledge-graph");
+            const width = svg.node().getBoundingClientRect().width;
+            const height = svg.node().getBoundingClientRect().height;
+            const svgGroup = svg.append("g"); // Group for zoom/pan
+
+            // --- Data Loading and Processing ---
+            Papa.parse(csvFilePath, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    const csvData = results.data;
+                    const nodesData = [];
+                    const linksData = [];
+                    const nodeMap = new Map(); // Track nodes by ID to avoid duplicates and manage links
+
+                    // Helper to add node if it doesn't exist
+                    const addNode = (label, level) => {
+                        if (!label) return null; // Skip empty labels
+                        const nodeId = `${label}_${level}`; // Simple ID generation
+                        if (!nodeMap.has(nodeId)) {
+                            const newNode = { id: nodeId, label: label, level: level };
+                            nodesData.push(newNode);
+                            nodeMap.set(nodeId, newNode);
+                            return newNode;
+                        }
+                        return nodeMap.get(nodeId);
+                    };
+
+                    // Process CSV data
+                    csvData.forEach(row => {
+                        let parentNode = null; // Track the parent for linking
+
+                        for (let i = 1; i <= 5; i++) { // Iterate through Level1 to Level5
+                            const levelKey = `Level${i}`;
+                            const nodeLabel = row[levelKey]?.trim();
+                            const currentLevel = i - 1; // D3 levels start from 0
+
+                            if (nodeLabel) {
+                                const currentNode = addNode(nodeLabel, currentLevel);
+
+                                // If there's a parent node from the previous level in the same row, add a link
+                                if (parentNode && currentNode && parentNode.id !== currentNode.id) {
+                                    const linkId = `${parentNode.id}_to_${currentNode.id}`;
+                                    // Avoid duplicate links (though force layout handles this somewhat)
+                                    if (!linksData.some(l => (l.source === parentNode.id && l.target === currentNode.id))) {
+                                        linksData.push({ source: parentNode.id, target: currentNode.id, id: linkId });
+                                    }
+                                }
+                                parentNode = currentNode; // Current node becomes parent for the next level in this row
+                            } else {
+                                break; // Stop processing this row if a level is empty
+                            }
+                        }
+                    });
+
+                    // --- D3 Setup ---
+                    const simulation = d3.forceSimulation(nodesData)
+                        .force("link", d3.forceLink(linksData).id(d => d.id).distance(d => 70 + (d.source.level * 10))) // Adjust distance based on level
+                        .force("charge", d3.forceManyBody().strength(-150))
+                        .force("center", d3.forceCenter(width / 2, height / 2))
+                        .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 5));
+
+                    // --- Drawing Elements ---
+                    const link = svgGroup.append("g")
+                        .attr("class", "links")
+                        .selectAll("line")
+                        .data(linksData)
+                        .enter().append("line")
+                        .attr("class", "link");
+
+                    const nodeGroup = svgGroup.append("g")
+                        .attr("class", "nodes")
+                        .selectAll("g")
+                        .data(nodesData)
+                        .enter().append("g")
+                        .attr("class", "node-group");
+
+                    const node = nodeGroup.append("circle")
+                        .attr("r", getNodeRadius)
+                        .attr("class", d => `node node-level-${d.level >= 0 && d.level <= 4 ? d.level : 'default'}`) // Apply level class or default
+                        .call(drag(simulation));
+
+                    node.append("title")
+                        .text(d => d.label); // Show label on hover
+
+                    const label = nodeGroup.append("text")
+                        .text(d => d.label)
+                        .attr("class", "node-label")
+                        .attr("dy", d => getNodeRadius(d) + 8); // Position label below node
+
+                    // --- Simulation Ticks ---
+                    simulation.on("tick", () => {
+                        link
+                            .attr("x1", d => d.source.x)
+                            .attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x)
+                            .attr("y2", d => d.target.y);
+
+                        nodeGroup
+                            .attr("transform", d => `translate(${d.x},${d.y})`);
+                    });
+
+                    // --- Interaction ---
+                    const zoom = d3.zoom()
+                        .scaleExtent([0.1, 4])
+                        .on("zoom", (event) => {
+                            svgGroup.attr("transform", event.transform);
+                        });
+                    svg.call(zoom);
+
+                },
+                error: function(error) {
+                    console.error("Error parsing CSV:", error);
+                    document.getElementById('graph-container').innerHTML = "Error loading or parsing CSV data. Check console.";
+                }
+            });
+
+            // --- Helper Functions ---
+            function getNodeRadius(d) {
+                // Adjust radius based on level
+                if (d.level === 0) return 15;
+                if (d.level === 1) return 12;
+                if (d.level === 2) return 9;
+                if (d.level === 3) return 7;
+                return 5; // Level 4 and potentially others
+            }
+
+            function drag(simulation) {
+                function dragstarted(event, d) {
+                    if (!event.active) simulation.alphaTarget(0.3).restart();
+                    d.fx = d.x;
+                    d.fy = d.y;
+                }
+                function dragged(event, d) {
+                    d.fx = event.x;
+                    d.fy = event.y;
+                }
+                function dragended(event, d) {
+                    if (!event.active) simulation.alphaTarget(0);
+                    d.fx = null;
+                    d.fy = null;
+                }
+                return d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended);
+            }
+        });
+    </script>
+</body>
+</html>

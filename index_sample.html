@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知識結構視覺化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* 基本樣式 */
+        body {
+            font-family: 'Inter', sans-serif; /* 使用 Inter 字體 */
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* 防止滾動條出現 */
+            background-color: #f3f4f6; /* Tailwind gray-100 */
+        }
+        /* SVG 容器樣式 */
+        #graph-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        svg {
+            width: 95%;
+            height: 95%;
+            border: 1px solid #e5e7eb; /* Tailwind gray-200 */
+            border-radius: 0.5rem; /* Tailwind rounded-lg */
+            background-color: #ffffff; /* 白色背景 */
+            cursor: grab; /* 拖曳手勢 */
+        }
+        svg:active {
+            cursor: grabbing; /* 拖曳中手勢 */
+        }
+        /* 連線樣式 */
+        .link {
+            stroke: #9ca3af; /* Tailwind gray-400 */
+            stroke-opacity: 0.6;
+        }
+        /* 節點樣式 */
+        .node {
+            cursor: pointer; /* 點擊手勢 */
+            transition: transform 0.1s ease-in-out; /* 懸停效果 */
+        }
+        .node:hover {
+            transform: scale(1.1); /* 懸停時放大 */
+        }
+        /* 節點文字樣式 */
+        .node-label {
+            font-size: 10px;
+            fill: #1f2937; /* Tailwind gray-800 */
+            pointer-events: none; /* 文字不影響滑鼠事件 */
+            text-anchor: middle; /* 文字置中 */
+            dominant-baseline: central; /* 垂直置中 */
+        }
+        /* 不同層級節點的顏色 */
+        .node-level-0 { fill: #ef4444; } /* Tailwind red-500 */
+        .node-level-1 { fill: #3b82f6; } /* Tailwind blue-500 */
+        .node-level-2 { fill: #10b981; } /* Tailwind emerald-500 */
+
+        /* 標題樣式 */
+        .title {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.5rem; /* Tailwind text-2xl */
+            font-weight: 600; /* Tailwind font-semibold */
+            color: #1f2937; /* Tailwind gray-800 */
+            z-index: 10; /* 確保在 SVG 之上 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="title">My knowledge Graph</div>
+    <div id="graph-container">
+        <svg id="knowledge-graph"></svg>
+    </div>
+
+    <script>
+        // --- 資料定義 ---
+        // 節點資料 (包含 id 和層級)
+        const nodesData = [
+            // Level 0 (Domain)
+            {"id": "人工智慧 (AI)", "level": 0},
+            {"id": "資料技能 (Data Skills)", "level": 0},
+            {"id": "工作流自動化", "level": 0},
+            {"id": "程式語言 (Programming)", "level": 0},
+            {"id": "網路社群行銷 (Online Marketing)", "level": 0},
+            {"id": "網站平台 (Web Platforms)", "level": 0},
+            {"id": "想法與反思 (Ideas-mind)", "level": 0},
+
+            // Level 1 (sub-level1)
+            {"id": "機器學習 (Machine Learning)", "level": 1},
+            {"id": "生成式 AI (Gen AI)", "level": 1},
+            {"id": "AI 代理 (AI Agents)", "level": 1},
+            {"id": "資料視覺化 (Data Visualization)", "level": 1},
+            {"id": "網路爬蟲 (Web Crawler)", "level": 1},
+            {"id": "資料庫 (Database)", "level": 1},
+            {"id": "統計分析 (Statistical Analysis)", "level": 1},
+            {"id": "n8n (Tool)", "level": 1},
+            {"id": "Git (Tool - Git)", "level": 1},
+            {"id": "API (Application Programming Interface)", "level": 1},
+            {"id": "Python", "level": 1},
+            {"id": "SEO (Search Engine Optimization)", "level": 1},
+            {"id": "WordPress (WordPress)", "level": 1},
+
+            // Level 2 (sub-level2)
+            {"id": "自然語言處理 (NLP)", "level": 2},
+            {"id": "Prompt 工程 (Prompt Engineering)", "level": 2},
+            {"id": "LLM (Large Language Model)", "level": 2},
+            {"id": "LangChain (Framework)", "level": 2},
+            {"id": "Multi-Agent (多代理)", "level": 2},
+            {"id": "Research Agency (研究代理)", "level": 2},
+            {"id": "CAG (Cache-Augmented Generation)", "level": 2},
+            {"id": "MCP", "level": 2},
+            {"id": "RAG (Retrieval-Augmented Generation)", "level": 2},
+            {"id": "Scrapy (Tool - Scrapy)", "level": 2},
+            {"id": "MySQL", "level": 2},
+            {"id": "Postgres", "level": 2},
+            {"id": "Vscode-Cline Augment", "level": 2}
+        ];
+
+        // 連線資料 (定義節點之間的關係)
+        const linksData = [
+            {"source": "人工智慧 (AI)", "target": "機器學習 (Machine Learning)"},
+            {"source": "機器學習 (Machine Learning)", "target": "自然語言處理 (NLP)"},
+            {"source": "人工智慧 (AI)", "target": "生成式 AI (Gen AI)"},
+            {"source": "生成式 AI (Gen AI)", "target": "Prompt 工程 (Prompt Engineering)"},
+            {"source": "生成式 AI (Gen AI)", "target": "LLM (Large Language Model)"},
+            {"source": "生成式 AI (Gen AI)", "target": "LangChain (Framework)"},
+            {"source": "人工智慧 (AI)", "target": "AI 代理 (AI Agents)"},
+            {"source": "AI 代理 (AI Agents)", "target": "Multi-Agent (多代理)"},
+            {"source": "AI 代理 (AI Agents)", "target": "Research Agency (研究代理)"},
+            {"source": "AI 代理 (AI Agents)", "target": "CAG (Cache-Augmented Generation)"},
+            {"source": "AI 代理 (AI Agents)", "target": "MCP"},
+            {"source": "AI 代理 (AI Agents)", "target": "RAG (Retrieval-Augmented Generation)"},
+            {"source": "資料技能 (Data Skills)", "target": "資料視覺化 (Data Visualization)"},
+            {"source": "資料技能 (Data Skills)", "target": "網路爬蟲 (Web Crawler)"},
+            {"source": "網路爬蟲 (Web Crawler)", "target": "Scrapy (Tool - Scrapy)"},
+            {"source": "資料技能 (Data Skills)", "target": "資料庫 (Database)"},
+            {"source": "資料庫 (Database)", "target": "MySQL"},
+            {"source": "資料庫 (Database)", "target": "Postgres"},
+            {"source": "資料技能 (Data Skills)", "target": "統計分析 (Statistical Analysis)"},
+            {"source": "工作流自動化", "target": "n8n (Tool)"},
+            {"source": "程式語言 (Programming)", "target": "Git (Tool - Git)"},
+            {"source": "程式語言 (Programming)", "target": "API (Application Programming Interface)"},
+            {"source": "程式語言 (Programming)", "target": "Python"},
+            {"source": "Python", "target": "Vscode-Cline Augment"},
+            {"source": "網路社群行銷 (Online Marketing)", "target": "SEO (Search Engine Optimization)"},
+            {"source": "網站平台 (Web Platforms)", "target": "WordPress (WordPress)"},
+            // {"source": "想法與反思 (Ideas-mind)", "target": "想法與反思 (Ideas-mind)"} // 移除自參考連結
+        ];
+
+        // --- D3 設定 ---
+        const svg = d3.select("#knowledge-graph");
+        const width = svg.node().getBoundingClientRect().width;
+        const height = svg.node().getBoundingClientRect().height;
+
+        // 創建力導向模擬
+        const simulation = d3.forceSimulation(nodesData)
+            .force("link", d3.forceLink(linksData).id(d => d.id).distance(70)) // 設定連結力，指定 id 訪問器和距離
+            .force("charge", d3.forceManyBody().strength(-150)) // 設定節點間的排斥力
+            .force("center", d3.forceCenter(width / 2, height / 2)) // 設定圖表中心力
+            .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 5)); // 防止節點重疊
+
+        // --- 繪製元素 ---
+        const svgGroup = svg.append("g"); // 用於縮放和拖曳的群組
+
+        // 繪製連線 (在節點之前繪製，使其位於底層)
+        const link = svgGroup.append("g")
+            .attr("class", "links")
+            .selectAll("line")
+            .data(linksData)
+            .enter().append("line")
+            .attr("class", "link");
+
+        // 繪製節點群組 (包含圓形和文字)
+        const nodeGroup = svgGroup.append("g")
+            .attr("class", "nodes")
+            .selectAll("g")
+            .data(nodesData)
+            .enter().append("g")
+            .attr("class", "node-group");
+
+        // 繪製節點圓形
+        const node = nodeGroup.append("circle")
+            .attr("r", getNodeRadius) // 根據層級設定半徑
+            .attr("class", d => `node node-level-${d.level}`) // 根據層級設定顏色
+            .call(drag(simulation)); // 加入拖曳功能
+
+        // 為節點添加標題 (滑鼠懸停時顯示)
+        node.append("title")
+            .text(d => d.id);
+
+        // 繪製節點文字標籤
+        const label = nodeGroup.append("text")
+            .text(d => d.id)
+            .attr("class", "node-label")
+            .attr("dy", d => getNodeRadius(d) + 8); // 調整文字位置，使其在圓形下方
+
+        // --- 力導向模擬更新 ---
+        // 定義每次模擬 "tick" 時執行的函數
+        simulation.on("tick", () => {
+            link
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            nodeGroup
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+
+        // --- 互動功能 ---
+
+        // 節點拖曳功能
+        function drag(simulation) {
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart(); // 增加 alphaTarget 使拖曳更平滑
+                d.fx = d.x; // 固定節點 x 座標
+                d.fy = d.y; // 固定節點 y 座標
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0); // 恢復 alphaTarget
+                d.fx = null; // 取消固定 x 座標
+                d.fy = null; // 取消固定 y 座標
+            }
+
+            return d3.drag()
+                .on("start", dragstarted)
+                .on("drag", dragged)
+                .on("end", dragended);
+        }
+
+        // SVG 縮放和平移功能
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4]) // 設定縮放範圍
+            .on("zoom", (event) => {
+                svgGroup.attr("transform", event.transform); // 應用縮放和平移變換
+            });
+
+        svg.call(zoom);
+
+        // --- 輔助函數 ---
+        // 根據節點層級決定半徑
+        function getNodeRadius(d) {
+            if (d.level === 0) return 15; // Domain 節點較大
+            if (d.level === 1) return 10; // sub-level1 節點中等
+            return 7; // sub-level2 節點較小
+        }
+
+    </script>
+</body>
+</html>
